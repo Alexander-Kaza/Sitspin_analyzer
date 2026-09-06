@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Sit Spin Analyzer</title>
+<title>Spin Analyzer</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -44,6 +44,7 @@
   .stat.good { border-color: #2ecc71; }
   .stat.okay { border-color: #f1c40f; }
   .stat.bad  { border-color: #e74c3c; }
+  .stat.neutral { border-color: #00E0FF; }
   .stat .label { opacity: 0.75; font-weight: 400; font-size: 11px; display: block; }
   .stat .value { font-size: 19px; }
 
@@ -52,6 +53,11 @@
     color: #fff; border: none; border-radius: 10px;
     padding: 8px 12px; font-size: 13px; font-weight: 600;
     margin-left: 6px;
+  }
+  #spinTypeSelect {
+    background: rgba(0,0,0,0.55);
+    color: #fff; border: none; border-radius: 10px;
+    padding: 8px 10px; font-size: 13px; font-weight: 600;
   }
   #rightControls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
   #rightControls .row { display: flex; }
@@ -83,12 +89,13 @@
     position: absolute; top: 60px; right: 12px; z-index: 30;
     background: rgba(20,20,20,0.92);
     color: #fff; border-radius: 14px; padding: 16px;
-    width: 240px; display: none;
-    font-size: 13px;
+    width: 250px; display: none;
+    font-size: 13px; max-height: 80vh; overflow-y: auto;
   }
   #settingsPanel.open { display: block; }
   #settingsPanel h3 { margin: 0 0 10px 0; font-size: 14px; }
-  #settingsPanel label { display: block; margin-top: 10px; opacity: 0.85; }
+  #settingsPanel .metricGroup { margin-top: 12px; }
+  #settingsPanel label { display: block; margin-top: 8px; opacity: 0.85; }
   #settingsPanel .rangeRow { display: flex; align-items: center; gap: 8px; }
   #settingsPanel input[type=range] { flex: 1; }
   #settingsPanel .val { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -96,11 +103,15 @@
     margin-top: 14px; width: 100%; padding: 8px; border-radius: 8px; border: none;
     background: #444; color: #fff; font-weight: 600;
   }
+  #settingsPanel .autoToggleRow {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 4px; padding: 8px 0; border-bottom: 1px solid #333;
+  }
 
   #summaryPanel {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
     z-index: 40; background: rgba(15,15,15,0.95); color: #fff;
-    border-radius: 16px; padding: 22px; width: 260px; display: none;
+    border-radius: 16px; padding: 22px; width: 270px; display: none;
     text-align: center;
   }
   #summaryPanel.open { display: block; }
@@ -128,11 +139,14 @@
     <div id="overlay"></div>
     <div id="rightControls">
       <div class="row">
+        <select id="spinTypeSelect"></select>
+      </div>
+      <div class="row">
         <button class="iconBtn" id="switchBtn">Flip</button>
         <button class="iconBtn" id="settingsBtn">Settings</button>
       </div>
       <div class="row">
-        <button class="iconBtn" id="recordBtn">● Record</button>
+        <button class="iconBtn" id="recordBtn">● Manual rec</button>
       </div>
     </div>
   </div>
@@ -142,26 +156,22 @@
   <button id="startBtn">Start Camera</button>
 
   <div id="settingsPanel">
-    <h3>Target thresholds</h3>
+    <h3>Spin detection</h3>
+    <div class="autoToggleRow">
+      <span>Auto start/stop on spin</span>
+      <input type="checkbox" id="autoDetectToggle" checked>
+    </div>
 
-    <label>Sitting knee — good if under <span class="val" id="sitGoodVal"></span>°</label>
-    <div class="rangeRow"><input type="range" id="sitGood" min="40" max="130" value="90"></div>
-
-    <label>Sitting knee — okay if under <span class="val" id="sitOkayVal"></span>°</label>
-    <div class="rangeRow"><input type="range" id="sitOkay" min="60" max="150" value="120"></div>
-
-    <label>Free leg — good if over <span class="val" id="freeGoodVal"></span>°</label>
-    <div class="rangeRow"><input type="range" id="freeGood" min="100" max="180" value="150"></div>
-
-    <label>Torso lean — good if under <span class="val" id="leanGoodVal"></span>°</label>
-    <div class="rangeRow"><input type="range" id="leanGood" min="5" max="60" value="20"></div>
+    <h3 style="margin-top:14px;">Target thresholds</h3>
+    <div id="metricSliders"></div>
 
     <button class="closeSettings" id="closeSettings">Done</button>
   </div>
 
   <div id="summaryPanel">
-    <h2>Session summary</h2>
-    <div class="row"><span>Deepest sit (knee angle)</span><span class="v" id="sumDeepest">--</span></div>
+    <h2 id="sumTitle">Session summary</h2>
+    <div class="row"><span>Total rotations</span><span class="v" id="sumRotations">--</span></div>
+    <div class="row"><span id="sumPrimaryLabel">Best angle</span><span class="v" id="sumDeepest">--</span></div>
     <div class="row"><span>Avg spin rate (approx.)</span><span class="v" id="sumSpin">--</span></div>
     <div class="row"><span>Duration</span><span class="v" id="sumDuration">--</span></div>
     <button id="closeSummary">Close</button>
@@ -189,6 +199,9 @@ const recordBtn = document.getElementById('recordBtn');
 const summaryPanel = document.getElementById('summaryPanel');
 const closeSummary = document.getElementById('closeSummary');
 const fpsBadge = document.getElementById('fpsBadge');
+const spinTypeSelect = document.getElementById('spinTypeSelect');
+const autoDetectToggle = document.getElementById('autoDetectToggle');
+const metricSlidersEl = document.getElementById('metricSliders');
 
 let poseLandmarker = null;
 let running = false;
@@ -196,22 +209,115 @@ let facingMode = 'environment';
 let lastVideoTime = -1;
 let currentStream = null;
 
-// ---- Adjustable thresholds ----
-const thresholds = {
-  sitGood: 90,
-  sitOkay: 120,
-  freeGood: 150,
-  leanGood: 20
+// ---------------------------------------------------------------------
+// Spin type presets. Each metric: { label, good, okay, higherIsBetter }
+// primary  = the "anchor" leg's knee angle (bent for sit spin, straight for
+//            camel/upright). null = not tracked for this spin type.
+// secondary= free leg extension knee angle. null = not tracked.
+// lean     = torso lean-from-vertical angle. direction of "good" varies
+//            (upright spins want low lean, camel/layback want high lean).
+// legRoleMode: 'bentKnee' (sit spin: more-bent knee = anchor leg) or
+//              'ankleHeight' (others: lower ankle on screen = anchor leg)
+// ---------------------------------------------------------------------
+const SPIN_CONFIGS = {
+  sit: {
+    name: 'Sit Spin',
+    legRoleMode: 'bentKnee',
+    primary:   { label: 'Sitting knee',179: null, good: 90,  okay: 120, higherIsBetter: false, dirWord: 'under' },
+    secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true,  dirWord: 'over' },
+    lean:      { label: 'Torso lean from vertical', good: 20, okay: 35, higherIsBetter: false, dirWord: 'under' }
+  },
+  camel: {
+    name: 'Camel Spin',
+    legRoleMode: 'ankleHeight',
+    primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
+    secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true, dirWord: 'over' },
+    lean:      { label: 'Torso lean (horizontal)', good: 65, okay: 45, higherIsBetter: true, dirWord: 'over' }
+  },
+  upright: {
+    name: 'Upright (Scratch) Spin',
+    legRoleMode: 'ankleHeight',
+    primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
+    secondary: null,
+    lean:      { label: 'Torso lean from vertical', good: 15, okay: 30, higherIsBetter: false, dirWord: 'under' }
+  },
+  layback: {
+    name: 'Layback Spin',
+    legRoleMode: 'ankleHeight',
+    primary: null,
+    secondary: { label: 'Free leg extension', good: 140, okay: 110, higherIsBetter: true, dirWord: 'over' },
+    lean:      { label: 'Back arch (lean)', good: 55, okay: 35, higherIsBetter: true, dirWord: 'over' }
+  }
 };
 
-['sitGood','sitOkay','freeGood','leanGood'].forEach(key => {
-  const input = document.getElementById(key);
-  const valEl = document.getElementById(key + 'Val');
-  valEl.textContent = input.value;
-  input.addEventListener('input', () => {
-    thresholds[key] = Number(input.value);
-    valEl.textContent = input.value;
+let currentSpinType = 'sit';
+
+// live (possibly user-adjusted) copy of thresholds per spin type
+const liveConfigs = JSON.parse(JSON.stringify(SPIN_CONFIGS));
+
+function populateSpinTypeSelect() {
+  Object.keys(SPIN_CONFIGS).forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = SPIN_CONFIGS[key].name;
+    spinTypeSelect.appendChild(opt);
   });
+  spinTypeSelect.value = currentSpinType;
+}
+populateSpinTypeSelect();
+
+function buildSliderRow(metricKey, metric, groupLabel) {
+  const wrap = document.createElement('div');
+  wrap.className = 'metricGroup';
+  wrap.dataset.metric = metricKey;
+
+  const goodLabel = document.createElement('label');
+  goodLabel.innerHTML = `${metric.label} — good if ${metric.dirWord} <span class="val" id="${metricKey}GoodVal">${metric.good}</span>°`;
+  const goodRow = document.createElement('div');
+  goodRow.className = 'rangeRow';
+  const goodInput = document.createElement('input');
+  goodInput.type = 'range'; goodInput.min = 0; goodInput.max = 180; goodInput.value = metric.good;
+  goodInput.id = metricKey + 'Good';
+  goodRow.appendChild(goodInput);
+
+  const okayLabel = document.createElement('label');
+  okayLabel.innerHTML = `${metric.label} — okay if ${metric.dirWord} <span class="val" id="${metricKey}OkayVal">${metric.okay}</span>°`;
+  const okayRow = document.createElement('div');
+  okayRow.className = 'rangeRow';
+  const okayInput = document.createElement('input');
+  okayInput.type = 'range'; okayInput.min = 0; okayInput.max = 180; okayInput.value = metric.okay;
+  okayInput.id = metricKey + 'Okay';
+  okayRow.appendChild(okayInput);
+
+  wrap.appendChild(goodLabel); wrap.appendChild(goodRow);
+  wrap.appendChild(okayLabel); wrap.appendChild(okayRow);
+
+  goodInput.addEventListener('input', () => {
+    liveConfigs[currentSpinType][metricKey].good = Number(goodInput.value);
+    document.getElementById(metricKey + 'GoodVal').textContent = goodInput.value;
+  });
+  okayInput.addEventListener('input', () => {
+    liveConfigs[currentSpinType][metricKey].okay = Number(okayInput.value);
+    document.getElementById(metricKey + 'OkayVal').textContent = okayInput.value;
+  });
+
+  return wrap;
+}
+
+function renderSliders() {
+  metricSlidersEl.innerHTML = '';
+  const cfg = liveConfigs[currentSpinType];
+  ['primary', 'secondary', 'lean'].forEach(key => {
+    if (cfg[key]) {
+      metricSlidersEl.appendChild(buildSliderRow(key, cfg[key]));
+    }
+  });
+}
+renderSliders();
+
+spinTypeSelect.addEventListener('change', () => {
+  currentSpinType = spinTypeSelect.value;
+  renderSliders();
 });
 
 settingsBtn.addEventListener('click', () => settingsPanel.classList.add('open'));
@@ -243,12 +349,53 @@ function torsoLeanAngle(shoulderMid, hipMid) {
   return Math.atan2(Math.abs(dx), Math.abs(dy)) * (180 / Math.PI);
 }
 
+function classify(value, metric) {
+  if (!metric) return 'neutral';
+  const { good, okay, higherIsBetter } = metric;
+  if (higherIsBetter) {
+    if (value >= good) return 'good';
+    if (value >= okay) return 'okay';
+    return 'bad';
+  } else {
+    if (value <= good) return 'good';
+    if (value <= okay) return 'okay';
+    return 'bad';
+  }
+}
+
+function determineLegRoles(lHip, rHip, lKnee, rKnee, lAnkle, rAnkle, mode) {
+  const leftKneeAngle = angleBetween(lHip, lKnee, lAnkle);
+  const rightKneeAngle = angleBetween(rHip, rKnee, rAnkle);
+  if (leftKneeAngle === null || rightKneeAngle === null) return null;
+
+  let primarySide, primaryAngle, secondarySide, secondaryAngle;
+  if (mode === 'bentKnee') {
+    if (leftKneeAngle <= rightKneeAngle) {
+      primarySide = 'Left'; primaryAngle = leftKneeAngle;
+      secondarySide = 'Right'; secondaryAngle = rightKneeAngle;
+    } else {
+      primarySide = 'Right'; primaryAngle = rightKneeAngle;
+      secondarySide = 'Left'; secondaryAngle = leftKneeAngle;
+    }
+  } else {
+    // ankleHeight: lower on screen (larger y) = closer to ice = skating leg
+    if (lAnkle.y >= rAnkle.y) {
+      primarySide = 'Left'; primaryAngle = leftKneeAngle;
+      secondarySide = 'Right'; secondaryAngle = rightKneeAngle;
+    } else {
+      primarySide = 'Right'; primaryAngle = rightKneeAngle;
+      secondarySide = 'Left'; secondaryAngle = leftKneeAngle;
+    }
+  }
+  return { primarySide, primaryAngle, secondarySide, secondaryAngle };
+}
+
 // ---- Audio cue ----
 let audioCtx = null;
 let lastBeepTime = 0;
 function beep() {
   const now = performance.now();
-  if (now - lastBeepTime < 1500) return; // debounce
+  if (now - lastBeepTime < 1500) return;
   lastBeepTime = now;
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -261,17 +408,60 @@ function beep() {
     osc.start();
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
     osc.stop(audioCtx.currentTime + 0.2);
-  } catch (e) { /* ignore audio errors */ }
+  } catch (e) { /* ignore */ }
 }
 
 // ---- Hip trail (centering visualization) ----
 const hipTrail = [];
 const TRAIL_MAX = 40;
 
-// ---- Spin rate estimation (approximate, 2D shoulder-width oscillation) ----
+// ---------------------------------------------------------------------
+// Spin rate + rotation counting + auto start/stop
+// ---------------------------------------------------------------------
 const spinSamples = []; // {t, ratio}
 const spinPeakTimes = [];
 let currentRPM = null;
+let lastPeriodMsEstimate = 800;
+
+let activeSession = null; // { mode: 'manual'|'auto', startTime, deepest, rpms:[], rotationHalfCount }
+let recording = false;    // manual toggle state
+let autoStopTimeout = null;
+
+function startSession(mode) {
+  activeSession = { mode, startTime: performance.now(), deepest: null, rpms: [], rotationHalfCount: 0 };
+  if (mode === 'auto') statusEl.textContent = 'Spin detected — tracking...';
+}
+
+function endSession() {
+  if (!activeSession) return;
+  showSummary(activeSession);
+  activeSession = null;
+  if (autoStopTimeout) { clearTimeout(autoStopTimeout); autoStopTimeout = null; }
+  statusEl.textContent = 'Live — analyzing pose';
+}
+
+function showSummary(session) {
+  const cfg = liveConfigs[currentSpinType];
+  const durationSec = ((performance.now() - session.startTime) / 1000).toFixed(1);
+  const rotations = Math.floor(session.rotationHalfCount / 2);
+  document.getElementById('sumTitle').textContent = SPIN_CONFIGS[currentSpinType].name + ' summary';
+  document.getElementById('sumRotations').textContent = rotations;
+
+  const primaryLabelEl = document.getElementById('sumPrimaryLabel');
+  const primaryValEl = document.getElementById('sumDeepest');
+  if (cfg.primary) {
+    primaryLabelEl.textContent = 'Best ' + cfg.primary.label.toLowerCase();
+    primaryValEl.textContent = session.deepest !== null ? session.deepest.toFixed(0) + '°' : '--';
+  } else {
+    primaryLabelEl.textContent = 'Best angle';
+    primaryValEl.textContent = '--';
+  }
+
+  const avgRPM = session.rpms.length ? (session.rpms.reduce((s, v) => s + v, 0) / session.rpms.length) : null;
+  document.getElementById('sumSpin').textContent = avgRPM ? avgRPM.toFixed(1) + ' rev/s' : '--';
+  document.getElementById('sumDuration').textContent = durationSec + 's';
+  summaryPanel.classList.add('open');
+}
 
 function updateSpinRate(shoulderWidth, torsoLen, now) {
   if (torsoLen <= 0) return;
@@ -285,54 +475,54 @@ function updateSpinRate(shoulderWidth, torsoLen, now) {
   const a = spinSamples[i - 1], b = spinSamples[i], c = spinSamples[i + 1];
   if (!a || !b || !c) return;
   const isPeak = b.ratio > a.ratio && b.ratio > c.ratio && b.ratio > 0.25;
+
   if (isPeak) {
     const lastPeak = spinPeakTimes[spinPeakTimes.length - 1];
     if (!lastPeak || (b.t - lastPeak) > 150) {
       spinPeakTimes.push(b.t);
       if (spinPeakTimes.length > 8) spinPeakTimes.shift();
+
+      // --- auto start/stop + rotation counting ---
+      if (!recording && autoDetectToggle.checked) {
+        if (!activeSession) startSession('auto');
+      }
+      if (activeSession) activeSession.rotationHalfCount++;
+
+      if (!recording && autoDetectToggle.checked) {
+        if (autoStopTimeout) clearTimeout(autoStopTimeout);
+        const timeoutMs = Math.max(900, lastPeriodMsEstimate * 1.8);
+        autoStopTimeout = setTimeout(() => {
+          if (activeSession && activeSession.mode === 'auto') endSession();
+        }, timeoutMs);
+      }
     }
   }
+
   if (spinPeakTimes.length >= 3) {
     const intervals = [];
-    for (let k = 1; k < spinPeakTimes.length; k++) intervals.push(spinPeakTimes[k] - spinPeakTimes[k-1]);
-    const avgIntervalMs = intervals.reduce((s,v)=>s+v,0) / intervals.length;
-    // two peaks per full rotation (facing camera + facing away)
+    for (let k = 1; k < spinPeakTimes.length; k++) intervals.push(spinPeakTimes[k] - spinPeakTimes[k - 1]);
+    const avgIntervalMs = intervals.reduce((s, v) => s + v, 0) / intervals.length;
     const periodMs = avgIntervalMs * 2;
+    lastPeriodMsEstimate = periodMs;
     currentRPM = 60000 / periodMs;
   }
 }
 
-// ---- Recording / session summary ----
-let recording = false;
-let sessionStart = 0;
-let deepestSitAngle = null; // smaller = deeper
-const sessionRPMs = [];
-
 recordBtn.addEventListener('click', () => {
   if (!recording) {
     recording = true;
-    sessionStart = performance.now();
-    deepestSitAngle = null;
-    sessionRPMs.length = 0;
+    if (autoStopTimeout) { clearTimeout(autoStopTimeout); autoStopTimeout = null; }
+    if (activeSession && activeSession.mode === 'auto') activeSession = null; // discard stray auto session
+    startSession('manual');
     recordBtn.textContent = '■ Stop';
     recordBtn.classList.add('recording');
   } else {
     recording = false;
-    recordBtn.textContent = '● Record';
+    recordBtn.textContent = '● Manual rec';
     recordBtn.classList.remove('recording');
-    showSummary();
+    endSession();
   }
 });
-
-function showSummary() {
-  const durationSec = ((performance.now() - sessionStart) / 1000).toFixed(1);
-  document.getElementById('sumDeepest').textContent =
-    deepestSitAngle !== null ? deepestSitAngle.toFixed(0) + '°' : '--';
-  const avgRPM = sessionRPMs.length ? (sessionRPMs.reduce((s,v)=>s+v,0) / sessionRPMs.length) : null;
-  document.getElementById('sumSpin').textContent = avgRPM ? avgRPM.toFixed(1) + ' rev/s' : '--';
-  document.getElementById('sumDuration').textContent = durationSec + 's';
-  summaryPanel.classList.add('open');
-}
 
 // ---- Setup ----
 async function setupPoseLandmarker() {
@@ -370,10 +560,9 @@ async function startCamera() {
   canvas.height = video.videoHeight;
 }
 
-// MediaPipe's 33-point pose includes face landmarks (indices 0-10: nose, eyes,
-// ears, mouth corners). We only care about body posture, so filter those out
-// of both the dots and the connector lines.
-const FACE_LANDMARK_CUTOFF = 11; // indices below this are face points
+// MediaPipe's 33-point pose includes face landmarks (indices 0-10). We only
+// care about body posture, so those are filtered out of drawing entirely.
+const FACE_LANDMARK_CUTOFF = 11;
 const BODY_CONNECTIONS = PoseLandmarker.POSE_CONNECTIONS.filter(
   (c) => c.start >= FACE_LANDMARK_CUTOFF && c.end >= FACE_LANDMARK_CUTOFF
 );
@@ -407,48 +596,25 @@ function drawHipTrail() {
   ctx.restore();
 }
 
-function classify(value, goodLimit, okayLimit, higherIsBetter) {
-  if (higherIsBetter) {
-    if (value >= goodLimit) return 'good';
-    if (value >= okayLimit) return 'okay';
-    return 'bad';
-  } else {
-    if (value <= goodLimit) return 'good';
-    if (value <= okayLimit) return 'okay';
-    return 'bad';
-  }
-}
-
 function updateStats(landmarksPx, now) {
   overlay.innerHTML = '';
+  const cfg = liveConfigs[currentSpinType];
 
   const lHip = landmarksPx[LM.L_HIP], rHip = landmarksPx[LM.R_HIP];
   const lKnee = landmarksPx[LM.L_KNEE], rKnee = landmarksPx[LM.R_KNEE];
   const lAnkle = landmarksPx[LM.L_ANKLE], rAnkle = landmarksPx[LM.R_ANKLE];
   const lShoulder = landmarksPx[LM.L_SHOULDER], rShoulder = landmarksPx[LM.R_SHOULDER];
 
-  const leftKneeAngle = angleBetween(lHip, lKnee, lAnkle);
-  const rightKneeAngle = angleBetween(rHip, rKnee, rAnkle);
+  const roles = determineLegRoles(lHip, rHip, lKnee, rKnee, lAnkle, rAnkle, SPIN_CONFIGS[currentSpinType].legRoleMode);
 
   const hipMid = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
   const shoulderMid = { x: (lShoulder.x + rShoulder.x) / 2, y: (lShoulder.y + rShoulder.y) / 2 };
   const leanAngle = torsoLeanAngle(shoulderMid, hipMid);
 
-  // Determine sitting leg (more bent = smaller angle) vs free leg
-  let sittingAngle, freeAngle, sittingSide;
-  if (leftKneeAngle !== null && rightKneeAngle !== null) {
-    if (leftKneeAngle <= rightKneeAngle) {
-      sittingAngle = leftKneeAngle; freeAngle = rightKneeAngle; sittingSide = 'Left';
-    } else {
-      sittingAngle = rightKneeAngle; freeAngle = leftKneeAngle; sittingSide = 'Right';
-    }
-  }
-
   const shoulderWidth = Math.hypot(rShoulder.x - lShoulder.x, rShoulder.y - lShoulder.y);
   const torsoLen = Math.hypot(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y);
   updateSpinRate(shoulderWidth, torsoLen, now);
 
-  // Hip trail
   hipTrail.push(hipMid);
   if (hipTrail.length > TRAIL_MAX) hipTrail.shift();
 
@@ -460,28 +626,35 @@ function updateStats(landmarksPx, now) {
 
   const stats = [];
 
-  if (sittingAngle !== undefined) {
-    const q = classify(sittingAngle, thresholds.sitGood, thresholds.sitOkay, false);
+  if (cfg.primary && roles) {
+    const q = classify(roles.primaryAngle, cfg.primary);
     worsen(q);
-    stats.push({ label: `Sitting leg (${sittingSide})`, value: sittingAngle.toFixed(0) + '°', q });
-    if (recording) {
-      if (deepestSitAngle === null || sittingAngle < deepestSitAngle) deepestSitAngle = sittingAngle;
+    stats.push({ label: `${cfg.primary.label} (${roles.primarySide})`, value: roles.primaryAngle.toFixed(0) + '°', q });
+    if (activeSession) {
+      const better = cfg.primary.higherIsBetter
+        ? (activeSession.deepest === null || roles.primaryAngle > activeSession.deepest)
+        : (activeSession.deepest === null || roles.primaryAngle < activeSession.deepest);
+      if (better) activeSession.deepest = roles.primaryAngle;
       if (q === 'good') beep();
     }
   }
-  if (freeAngle !== undefined) {
-    const q = classify(freeAngle, thresholds.freeGood, thresholds.freeGood - 30, true);
+  if (cfg.secondary && roles) {
+    const q = classify(roles.secondaryAngle, cfg.secondary);
     worsen(q);
-    stats.push({ label: 'Free leg extension', value: freeAngle.toFixed(0) + '°', q });
+    stats.push({ label: `${cfg.secondary.label} (${roles.secondarySide})`, value: roles.secondaryAngle.toFixed(0) + '°', q });
   }
-  {
-    const q = classify(leanAngle, thresholds.leanGood, thresholds.leanGood + 15, false);
+  if (cfg.lean) {
+    const q = classify(leanAngle, cfg.lean);
     worsen(q);
-    stats.push({ label: 'Torso lean from vertical', value: leanAngle.toFixed(0) + '°', q });
+    stats.push({ label: cfg.lean.label, value: leanAngle.toFixed(0) + '°', q });
   }
   if (currentRPM !== null) {
-    stats.push({ label: 'Spin rate (approx.)', value: currentRPM.toFixed(1) + ' rev/s', q: 'okay' });
-    if (recording) sessionRPMs.push(currentRPM);
+    stats.push({ label: 'Spin rate (approx.)', value: currentRPM.toFixed(1) + ' rev/s', q: 'neutral' });
+    if (activeSession) activeSession.rpms.push(currentRPM);
+  }
+  if (activeSession) {
+    const rotations = Math.floor(activeSession.rotationHalfCount / 2);
+    stats.push({ label: `Rotations (${activeSession.mode})`, value: String(rotations), q: 'neutral' });
   }
 
   stats.forEach(s => {
