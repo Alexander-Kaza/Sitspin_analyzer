@@ -151,6 +151,18 @@ async function startCamera() {
   };
   currentStream = await navigator.mediaDevices.getUserMedia(constraints);
   video.srcObject = currentStream;
+
+  // Wait until the video's actual dimensions are known before sizing the canvas.
+  // Without this, videoWidth/videoHeight can still be 0 right after play(),
+  // producing a 0x0 canvas and a blank screen.
+  await new Promise((resolve) => {
+    if (video.readyState >= 2 && video.videoWidth > 0) {
+      resolve();
+    } else {
+      video.onloadedmetadata = () => resolve();
+    }
+  });
+
   await video.play();
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
