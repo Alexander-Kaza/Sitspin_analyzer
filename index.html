@@ -5,43 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Sit Spin Analyzer</title>
 <style>
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     background: #000; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-  #container {
-    position: relative; width: 100vw; height: 100vh;
-  }
+  #container { position: relative; width: 100vw; height: 100vh; }
   video, canvas {
     position: absolute; top: 0; left: 0;
     width: 100%; height: 100%;
     object-fit: cover;
   }
   video { display: none; }
+
+  #topBar {
+    position: absolute; top: 0; left: 0; width: 100%;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 12px; z-index: 10; pointer-events: none;
+  }
+  #topBar > * { pointer-events: auto; }
+
   #overlay {
-    position: absolute; top: 0; left: 0; z-index: 5;
-    width: 100%; padding: 12px;
     display: flex; flex-direction: column; gap: 6px;
-    pointer-events: none;
   }
   .stat {
-    background: rgba(0,0,0,0.55);
+    background: rgba(0,0,0,0.6);
+    border-left: 4px solid #888;
     color: #fff;
     padding: 6px 12px;
-    border-radius: 10px;
-    font-size: 15px;
+    border-radius: 8px;
+    font-size: 14px;
     font-weight: 600;
     width: fit-content;
     text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    transition: border-color 0.2s;
   }
-  .stat .label { opacity: 0.75; font-weight: 400; font-size: 12px; display: block; }
-  .stat .value { font-size: 20px; }
+  .stat.good { border-color: #2ecc71; }
+  .stat.okay { border-color: #f1c40f; }
+  .stat.bad  { border-color: #e74c3c; }
+  .stat .label { opacity: 0.75; font-weight: 400; font-size: 11px; display: block; }
+  .stat .value { font-size: 19px; }
+
+  .iconBtn {
+    background: rgba(0,0,0,0.55);
+    color: #fff; border: none; border-radius: 10px;
+    padding: 8px 12px; font-size: 13px; font-weight: 600;
+    margin-left: 6px;
+  }
+  #rightControls { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  #rightControls .row { display: flex; }
+
   #status {
     position: absolute; bottom: 0; left: 0; width: 100%;
-    padding: 14px; text-align: center;
-    color: #fff; font-size: 14px;
+    padding: 12px; text-align: center;
+    color: #fff; font-size: 13px;
     background: rgba(0,0,0,0.5);
     z-index: 10;
   }
@@ -58,11 +76,46 @@
     color: white;
     box-shadow: 0 4px 14px rgba(0,0,0,0.4);
   }
-  #switchBtn {
-    position: absolute; top: 12px; right: 12px; z-index: 10;
-    background: rgba(0,0,0,0.55);
-    color: #fff; border: none; border-radius: 10px;
-    padding: 8px 14px; font-size: 14px;
+
+  #recordBtn.recording { background: #2ecc71; }
+
+  #settingsPanel {
+    position: absolute; top: 60px; right: 12px; z-index: 30;
+    background: rgba(20,20,20,0.92);
+    color: #fff; border-radius: 14px; padding: 16px;
+    width: 240px; display: none;
+    font-size: 13px;
+  }
+  #settingsPanel.open { display: block; }
+  #settingsPanel h3 { margin: 0 0 10px 0; font-size: 14px; }
+  #settingsPanel label { display: block; margin-top: 10px; opacity: 0.85; }
+  #settingsPanel .rangeRow { display: flex; align-items: center; gap: 8px; }
+  #settingsPanel input[type=range] { flex: 1; }
+  #settingsPanel .val { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  #settingsPanel .closeSettings {
+    margin-top: 14px; width: 100%; padding: 8px; border-radius: 8px; border: none;
+    background: #444; color: #fff; font-weight: 600;
+  }
+
+  #summaryPanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 40; background: rgba(15,15,15,0.95); color: #fff;
+    border-radius: 16px; padding: 22px; width: 260px; display: none;
+    text-align: center;
+  }
+  #summaryPanel.open { display: block; }
+  #summaryPanel h2 { margin: 0 0 12px 0; font-size: 17px; }
+  #summaryPanel .row { display: flex; justify-content: space-between; margin: 8px 0; font-size: 14px; }
+  #summaryPanel .row .v { font-weight: 700; }
+  #summaryPanel button {
+    margin-top: 14px; width: 100%; padding: 10px; border-radius: 10px; border: none;
+    background: #ff3b30; color: #fff; font-weight: 700;
+  }
+
+  #fpsBadge {
+    position: absolute; bottom: 38px; left: 12px; z-index: 10;
+    background: rgba(0,0,0,0.5); color: #9be89b; font-size: 11px;
+    padding: 4px 8px; border-radius: 6px; font-variant-numeric: tabular-nums;
   }
 </style>
 </head>
@@ -70,10 +123,49 @@
 <div id="container">
   <video id="video" playsinline autoplay muted></video>
   <canvas id="canvas"></canvas>
-  <div id="overlay"></div>
-  <button id="switchBtn">Flip camera</button>
-  <button id="startBtn">Start Camera</button>
+
+  <div id="topBar">
+    <div id="overlay"></div>
+    <div id="rightControls">
+      <div class="row">
+        <button class="iconBtn" id="switchBtn">Flip</button>
+        <button class="iconBtn" id="settingsBtn">Settings</button>
+      </div>
+      <div class="row">
+        <button class="iconBtn" id="recordBtn">● Record</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fpsBadge">-- fps</div>
   <div id="status">Tap Start, then point the camera at the skater.</div>
+  <button id="startBtn">Start Camera</button>
+
+  <div id="settingsPanel">
+    <h3>Target thresholds</h3>
+
+    <label>Sitting knee — good if under <span class="val" id="sitGoodVal"></span>°</label>
+    <div class="rangeRow"><input type="range" id="sitGood" min="40" max="130" value="90"></div>
+
+    <label>Sitting knee — okay if under <span class="val" id="sitOkayVal"></span>°</label>
+    <div class="rangeRow"><input type="range" id="sitOkay" min="60" max="150" value="120"></div>
+
+    <label>Free leg — good if over <span class="val" id="freeGoodVal"></span>°</label>
+    <div class="rangeRow"><input type="range" id="freeGood" min="100" max="180" value="150"></div>
+
+    <label>Torso lean — good if under <span class="val" id="leanGoodVal"></span>°</label>
+    <div class="rangeRow"><input type="range" id="leanGood" min="5" max="60" value="20"></div>
+
+    <button class="closeSettings" id="closeSettings">Done</button>
+  </div>
+
+  <div id="summaryPanel">
+    <h2>Session summary</h2>
+    <div class="row"><span>Deepest sit (knee angle)</span><span class="v" id="sumDeepest">--</span></div>
+    <div class="row"><span>Avg spin rate (approx.)</span><span class="v" id="sumSpin">--</span></div>
+    <div class="row"><span>Duration</span><span class="v" id="sumDuration">--</span></div>
+    <button id="closeSummary">Close</button>
+  </div>
 </div>
 
 <script type="module">
@@ -90,12 +182,41 @@ const overlay = document.getElementById('overlay');
 const statusEl = document.getElementById('status');
 const startBtn = document.getElementById('startBtn');
 const switchBtn = document.getElementById('switchBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+const closeSettings = document.getElementById('closeSettings');
+const recordBtn = document.getElementById('recordBtn');
+const summaryPanel = document.getElementById('summaryPanel');
+const closeSummary = document.getElementById('closeSummary');
+const fpsBadge = document.getElementById('fpsBadge');
 
 let poseLandmarker = null;
 let running = false;
-let facingMode = 'environment'; // rear camera by default
+let facingMode = 'environment';
 let lastVideoTime = -1;
 let currentStream = null;
+
+// ---- Adjustable thresholds ----
+const thresholds = {
+  sitGood: 90,
+  sitOkay: 120,
+  freeGood: 150,
+  leanGood: 20
+};
+
+['sitGood','sitOkay','freeGood','leanGood'].forEach(key => {
+  const input = document.getElementById(key);
+  const valEl = document.getElementById(key + 'Val');
+  valEl.textContent = input.value;
+  input.addEventListener('input', () => {
+    thresholds[key] = Number(input.value);
+    valEl.textContent = input.value;
+  });
+});
+
+settingsBtn.addEventListener('click', () => settingsPanel.classList.add('open'));
+closeSettings.addEventListener('click', () => settingsPanel.classList.remove('open'));
+closeSummary.addEventListener('click', () => summaryPanel.classList.remove('open'));
 
 const LM = {
   L_SHOULDER: 11, R_SHOULDER: 12,
@@ -105,7 +226,6 @@ const LM = {
 };
 
 function angleBetween(a, b, c) {
-  // angle at point b, formed by a-b-c, in degrees
   const v1 = { x: a.x - b.x, y: a.y - b.y };
   const v2 = { x: c.x - b.x, y: c.y - b.y };
   const dot = v1.x * v2.x + v1.y * v2.y;
@@ -118,13 +238,103 @@ function angleBetween(a, b, c) {
 }
 
 function torsoLeanAngle(shoulderMid, hipMid) {
-  // angle from vertical axis, in degrees. 0 = perfectly upright.
   const dx = shoulderMid.x - hipMid.x;
   const dy = shoulderMid.y - hipMid.y;
-  const angleFromVertical = Math.atan2(Math.abs(dx), Math.abs(dy)) * (180 / Math.PI);
-  return angleFromVertical;
+  return Math.atan2(Math.abs(dx), Math.abs(dy)) * (180 / Math.PI);
 }
 
+// ---- Audio cue ----
+let audioCtx = null;
+let lastBeepTime = 0;
+function beep() {
+  const now = performance.now();
+  if (now - lastBeepTime < 1500) return; // debounce
+  lastBeepTime = now;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.15;
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+    osc.stop(audioCtx.currentTime + 0.2);
+  } catch (e) { /* ignore audio errors */ }
+}
+
+// ---- Hip trail (centering visualization) ----
+const hipTrail = [];
+const TRAIL_MAX = 40;
+
+// ---- Spin rate estimation (approximate, 2D shoulder-width oscillation) ----
+const spinSamples = []; // {t, ratio}
+const spinPeakTimes = [];
+let currentRPM = null;
+
+function updateSpinRate(shoulderWidth, torsoLen, now) {
+  if (torsoLen <= 0) return;
+  const ratio = shoulderWidth / torsoLen;
+  spinSamples.push({ t: now, ratio });
+  const cutoff = now - 4000;
+  while (spinSamples.length && spinSamples[0].t < cutoff) spinSamples.shift();
+
+  if (spinSamples.length < 5) return;
+  const i = spinSamples.length - 3;
+  const a = spinSamples[i - 1], b = spinSamples[i], c = spinSamples[i + 1];
+  if (!a || !b || !c) return;
+  const isPeak = b.ratio > a.ratio && b.ratio > c.ratio && b.ratio > 0.25;
+  if (isPeak) {
+    const lastPeak = spinPeakTimes[spinPeakTimes.length - 1];
+    if (!lastPeak || (b.t - lastPeak) > 150) {
+      spinPeakTimes.push(b.t);
+      if (spinPeakTimes.length > 8) spinPeakTimes.shift();
+    }
+  }
+  if (spinPeakTimes.length >= 3) {
+    const intervals = [];
+    for (let k = 1; k < spinPeakTimes.length; k++) intervals.push(spinPeakTimes[k] - spinPeakTimes[k-1]);
+    const avgIntervalMs = intervals.reduce((s,v)=>s+v,0) / intervals.length;
+    // two peaks per full rotation (facing camera + facing away)
+    const periodMs = avgIntervalMs * 2;
+    currentRPM = 60000 / periodMs;
+  }
+}
+
+// ---- Recording / session summary ----
+let recording = false;
+let sessionStart = 0;
+let deepestSitAngle = null; // smaller = deeper
+const sessionRPMs = [];
+
+recordBtn.addEventListener('click', () => {
+  if (!recording) {
+    recording = true;
+    sessionStart = performance.now();
+    deepestSitAngle = null;
+    sessionRPMs.length = 0;
+    recordBtn.textContent = '■ Stop';
+    recordBtn.classList.add('recording');
+  } else {
+    recording = false;
+    recordBtn.textContent = '● Record';
+    recordBtn.classList.remove('recording');
+    showSummary();
+  }
+});
+
+function showSummary() {
+  const durationSec = ((performance.now() - sessionStart) / 1000).toFixed(1);
+  document.getElementById('sumDeepest').textContent =
+    deepestSitAngle !== null ? deepestSitAngle.toFixed(0) + '°' : '--';
+  const avgRPM = sessionRPMs.length ? (sessionRPMs.reduce((s,v)=>s+v,0) / sessionRPMs.length) : null;
+  document.getElementById('sumSpin').textContent = avgRPM ? avgRPM.toFixed(1) + ' rev/s' : '--';
+  document.getElementById('sumDuration').textContent = durationSec + 's';
+  summaryPanel.classList.add('open');
+}
+
+// ---- Setup ----
 async function setupPoseLandmarker() {
   statusEl.textContent = "Loading pose model...";
   const vision = await FilesetResolver.forVisionTasks(
@@ -142,9 +352,7 @@ async function setupPoseLandmarker() {
 }
 
 async function startCamera() {
-  if (currentStream) {
-    currentStream.getTracks().forEach(t => t.stop());
-  }
+  if (currentStream) currentStream.getTracks().forEach(t => t.stop());
   const constraints = {
     video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
     audio: false
@@ -152,15 +360,9 @@ async function startCamera() {
   currentStream = await navigator.mediaDevices.getUserMedia(constraints);
   video.srcObject = currentStream;
 
-  // Wait until the video's actual dimensions are known before sizing the canvas.
-  // Without this, videoWidth/videoHeight can still be 0 right after play(),
-  // producing a 0x0 canvas and a blank screen.
   await new Promise((resolve) => {
-    if (video.readyState >= 2 && video.videoWidth > 0) {
-      resolve();
-    } else {
-      video.onloadedmetadata = () => resolve();
-    }
+    if (video.readyState >= 2 && video.videoWidth > 0) resolve();
+    else video.onloadedmetadata = () => resolve();
   });
 
   await video.play();
@@ -168,19 +370,62 @@ async function startCamera() {
   canvas.height = video.videoHeight;
 }
 
-function drawSkeleton(landmarks) {
+// MediaPipe's 33-point pose includes face landmarks (indices 0-10: nose, eyes,
+// ears, mouth corners). We only care about body posture, so filter those out
+// of both the dots and the connector lines.
+const FACE_LANDMARK_CUTOFF = 11; // indices below this are face points
+const BODY_CONNECTIONS = PoseLandmarker.POSE_CONNECTIONS.filter(
+  (c) => c.start >= FACE_LANDMARK_CUTOFF && c.end >= FACE_LANDMARK_CUTOFF
+);
+
+function drawSkeleton(landmarks, overallQuality) {
   const drawingUtils = new DrawingUtils(ctx);
-  drawingUtils.drawLandmarks(landmarks, { radius: 4, color: '#00FF88' });
-  drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, { color: '#00E0FF', lineWidth: 3 });
+  const colorMap = { good: '#2ecc71', okay: '#f1c40f', bad: '#e74c3c' };
+  const color = colorMap[overallQuality] || '#00E0FF';
+
+  const bodyLandmarks = landmarks.map((lm, i) =>
+    i < FACE_LANDMARK_CUTOFF ? { x: -1, y: -1, z: 0, visibility: 0 } : lm
+  );
+
+  drawingUtils.drawLandmarks(bodyLandmarks, { radius: 4, color: '#ffffff' });
+  drawingUtils.drawConnectors(landmarks, BODY_CONNECTIONS, { color, lineWidth: 3 });
 }
 
-function updateStats(landmarks) {
+function drawHipTrail() {
+  if (hipTrail.length < 2) return;
+  ctx.save();
+  for (let i = 1; i < hipTrail.length; i++) {
+    const p0 = hipTrail[i - 1], p1 = hipTrail[i];
+    const alpha = i / hipTrail.length;
+    ctx.strokeStyle = `rgba(0, 224, 255, ${alpha * 0.7})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function classify(value, goodLimit, okayLimit, higherIsBetter) {
+  if (higherIsBetter) {
+    if (value >= goodLimit) return 'good';
+    if (value >= okayLimit) return 'okay';
+    return 'bad';
+  } else {
+    if (value <= goodLimit) return 'good';
+    if (value <= okayLimit) return 'okay';
+    return 'bad';
+  }
+}
+
+function updateStats(landmarksPx, now) {
   overlay.innerHTML = '';
 
-  const lHip = landmarks[LM.L_HIP], rHip = landmarks[LM.R_HIP];
-  const lKnee = landmarks[LM.L_KNEE], rKnee = landmarks[LM.R_KNEE];
-  const lAnkle = landmarks[LM.L_ANKLE], rAnkle = landmarks[LM.R_ANKLE];
-  const lShoulder = landmarks[LM.L_SHOULDER], rShoulder = landmarks[LM.R_SHOULDER];
+  const lHip = landmarksPx[LM.L_HIP], rHip = landmarksPx[LM.R_HIP];
+  const lKnee = landmarksPx[LM.L_KNEE], rKnee = landmarksPx[LM.R_KNEE];
+  const lAnkle = landmarksPx[LM.L_ANKLE], rAnkle = landmarksPx[LM.R_ANKLE];
+  const lShoulder = landmarksPx[LM.L_SHOULDER], rShoulder = landmarksPx[LM.R_SHOULDER];
 
   const leftKneeAngle = angleBetween(lHip, lKnee, lAnkle);
   const rightKneeAngle = angleBetween(rHip, rKnee, rAnkle);
@@ -189,38 +434,96 @@ function updateStats(landmarks) {
   const shoulderMid = { x: (lShoulder.x + rShoulder.x) / 2, y: (lShoulder.y + rShoulder.y) / 2 };
   const leanAngle = torsoLeanAngle(shoulderMid, hipMid);
 
-  const stats = [
-    { label: 'Left knee angle', value: leftKneeAngle ? leftKneeAngle.toFixed(0) + '°' : '--' },
-    { label: 'Right knee angle', value: rightKneeAngle ? rightKneeAngle.toFixed(0) + '°' : '--' },
-    { label: 'Torso lean from vertical', value: leanAngle.toFixed(0) + '°' }
-  ];
+  // Determine sitting leg (more bent = smaller angle) vs free leg
+  let sittingAngle, freeAngle, sittingSide;
+  if (leftKneeAngle !== null && rightKneeAngle !== null) {
+    if (leftKneeAngle <= rightKneeAngle) {
+      sittingAngle = leftKneeAngle; freeAngle = rightKneeAngle; sittingSide = 'Left';
+    } else {
+      sittingAngle = rightKneeAngle; freeAngle = leftKneeAngle; sittingSide = 'Right';
+    }
+  }
+
+  const shoulderWidth = Math.hypot(rShoulder.x - lShoulder.x, rShoulder.y - lShoulder.y);
+  const torsoLen = Math.hypot(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y);
+  updateSpinRate(shoulderWidth, torsoLen, now);
+
+  // Hip trail
+  hipTrail.push(hipMid);
+  if (hipTrail.length > TRAIL_MAX) hipTrail.shift();
+
+  let overallQuality = 'good';
+  const worsen = (q) => {
+    if (q === 'bad') overallQuality = 'bad';
+    else if (q === 'okay' && overallQuality !== 'bad') overallQuality = 'okay';
+  };
+
+  const stats = [];
+
+  if (sittingAngle !== undefined) {
+    const q = classify(sittingAngle, thresholds.sitGood, thresholds.sitOkay, false);
+    worsen(q);
+    stats.push({ label: `Sitting leg (${sittingSide})`, value: sittingAngle.toFixed(0) + '°', q });
+    if (recording) {
+      if (deepestSitAngle === null || sittingAngle < deepestSitAngle) deepestSitAngle = sittingAngle;
+      if (q === 'good') beep();
+    }
+  }
+  if (freeAngle !== undefined) {
+    const q = classify(freeAngle, thresholds.freeGood, thresholds.freeGood - 30, true);
+    worsen(q);
+    stats.push({ label: 'Free leg extension', value: freeAngle.toFixed(0) + '°', q });
+  }
+  {
+    const q = classify(leanAngle, thresholds.leanGood, thresholds.leanGood + 15, false);
+    worsen(q);
+    stats.push({ label: 'Torso lean from vertical', value: leanAngle.toFixed(0) + '°', q });
+  }
+  if (currentRPM !== null) {
+    stats.push({ label: 'Spin rate (approx.)', value: currentRPM.toFixed(1) + ' rev/s', q: 'okay' });
+    if (recording) sessionRPMs.push(currentRPM);
+  }
 
   stats.forEach(s => {
     const div = document.createElement('div');
-    div.className = 'stat';
+    div.className = 'stat ' + (s.q || '');
     div.innerHTML = `<span class="label">${s.label}</span><span class="value">${s.value}</span>`;
     overlay.appendChild(div);
   });
+
+  return overallQuality;
+}
+
+// ---- FPS tracking ----
+let frameTimes = [];
+function updateFps(now) {
+  frameTimes.push(now);
+  const cutoff = now - 1000;
+  frameTimes = frameTimes.filter(t => t > cutoff);
+  fpsBadge.textContent = frameTimes.length + ' fps';
 }
 
 function renderLoop() {
   if (!running) return;
+  const now = performance.now();
   if (video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
-    const result = poseLandmarker.detectForVideo(video, performance.now());
+    const result = poseLandmarker.detectForVideo(video, now);
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
     if (result.landmarks && result.landmarks.length > 0) {
       const landmarks = result.landmarks[0];
-      // convert normalized coords to pixel coords for drawing
       const pixelLandmarks = landmarks.map(p => ({ x: p.x * canvas.width, y: p.y * canvas.height, z: p.z }));
-      drawSkeleton(landmarks); // DrawingUtils expects normalized coords + its own transform
-      updateStats(pixelLandmarks);
+      const quality = updateStats(pixelLandmarks, now);
+      drawHipTrail();
+      drawSkeleton(landmarks, quality);
     } else {
       overlay.innerHTML = '<div class="stat">No person detected</div>';
     }
     ctx.restore();
+    updateFps(now);
   }
   requestAnimationFrame(renderLoop);
 }
@@ -241,9 +544,7 @@ startBtn.addEventListener('click', async () => {
 
 switchBtn.addEventListener('click', async () => {
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
-  if (running) {
-    await startCamera();
-  }
+  if (running) await startCamera();
 });
 </script>
 </body>
