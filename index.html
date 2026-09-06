@@ -128,6 +128,27 @@
     background: rgba(0,0,0,0.5); color: #9be89b; font-size: 11px;
     padding: 4px 8px; border-radius: 6px; font-variant-numeric: tabular-nums;
   }
+
+  #historyPanel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 40; background: rgba(15,15,15,0.96); color: #fff;
+    border-radius: 16px; padding: 20px; width: 300px; max-height: 75vh;
+    display: none; overflow-y: auto;
+  }
+  #historyPanel.open { display: block; }
+  #historyPanel h2 { margin: 0 0 12px 0; font-size: 16px; text-align: center; }
+  #historyList { display: flex; flex-direction: column; gap: 8px; }
+  .historyRow {
+    background: rgba(255,255,255,0.06); border-radius: 10px; padding: 10px 12px;
+    font-size: 12px;
+  }
+  .historyRow .hTitle { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .historyRow .hMeta { opacity: 0.75; }
+  #historyPanel button {
+    padding: 9px; border-radius: 10px; border: none; color: #fff; font-weight: 600;
+    background: #ff3b30;
+  }
+  #emptyHistoryMsg { opacity: 0.6; text-align: center; padding: 12px 0; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -144,9 +165,14 @@
       <div class="row">
         <button class="iconBtn" id="switchBtn">Flip</button>
         <button class="iconBtn" id="settingsBtn">Settings</button>
+        <button class="iconBtn" id="historyBtn">History</button>
       </div>
       <div class="row">
         <button class="iconBtn" id="recordBtn">● Manual rec</button>
+      </div>
+      <div class="row">
+        <button class="iconBtn" id="rotMinusBtn">−1 rev</button>
+        <button class="iconBtn" id="rotPlusBtn">+1 rev</button>
       </div>
     </div>
   </div>
@@ -176,6 +202,16 @@
     <div class="row"><span>Duration</span><span class="v" id="sumDuration">--</span></div>
     <button id="closeSummary">Close</button>
   </div>
+
+  <div id="historyPanel">
+    <h2>Session history</h2>
+    <div id="historyList"></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button id="exportHistoryBtn" style="flex:1;">Share / Copy</button>
+      <button id="clearHistoryBtn" style="flex:1; background:#444;">Clear</button>
+    </div>
+    <button id="closeHistory" style="margin-top:8px;">Close</button>
+  </div>
 </div>
 
 <script type="module">
@@ -202,6 +238,14 @@ const fpsBadge = document.getElementById('fpsBadge');
 const spinTypeSelect = document.getElementById('spinTypeSelect');
 const autoDetectToggle = document.getElementById('autoDetectToggle');
 const metricSlidersEl = document.getElementById('metricSliders');
+const rotMinusBtn = document.getElementById('rotMinusBtn');
+const rotPlusBtn = document.getElementById('rotPlusBtn');
+const historyBtn = document.getElementById('historyBtn');
+const historyPanel = document.getElementById('historyPanel');
+const historyList = document.getElementById('historyList');
+const closeHistory = document.getElementById('closeHistory');
+const exportHistoryBtn = document.getElementById('exportHistoryBtn');
+const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
 let poseLandmarker = null;
 let running = false;
@@ -221,14 +265,35 @@ let currentStream = null;
 // ---------------------------------------------------------------------
 const SPIN_CONFIGS = {
   sit: {
-    name: 'Sit Spin',
+    name: 'Sit Spin (Forward)',
     legRoleMode: 'bentKnee',
-    primary:   { label: 'Sitting knee',179: null, good: 90,  okay: 120, higherIsBetter: false, dirWord: 'under' },
+    primary:   { label: 'Sitting knee', good: 90,  okay: 120, higherIsBetter: false, dirWord: 'under' },
+    secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true,  dirWord: 'over' },
+    lean:      { label: 'Torso lean from vertical', good: 20, okay: 35, higherIsBetter: false, dirWord: 'under' }
+  },
+  sitBack: {
+    name: 'Back Sit Spin',
+    legRoleMode: 'bentKnee',
+    primary:   { label: 'Sitting knee', good: 90,  okay: 120, higherIsBetter: false, dirWord: 'under' },
+    secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true,  dirWord: 'over' },
+    lean:      { label: 'Torso lean from vertical', good: 20, okay: 35, higherIsBetter: false, dirWord: 'under' }
+  },
+  sitChange: {
+    name: 'Change Sit Spin (Back→Forward)',
+    legRoleMode: 'bentKnee',
+    primary:   { label: 'Sitting knee', good: 90,  okay: 120, higherIsBetter: false, dirWord: 'under' },
     secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true,  dirWord: 'over' },
     lean:      { label: 'Torso lean from vertical', good: 20, okay: 35, higherIsBetter: false, dirWord: 'under' }
   },
   camel: {
     name: 'Camel Spin',
+    legRoleMode: 'ankleHeight',
+    primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
+    secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true, dirWord: 'over' },
+    lean:      { label: 'Torso lean (horizontal)', good: 65, okay: 45, higherIsBetter: true, dirWord: 'over' }
+  },
+  camelBack: {
+    name: 'Back Camel Spin',
     legRoleMode: 'ankleHeight',
     primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
     secondary: { label: 'Free leg extension', good: 150, okay: 120, higherIsBetter: true, dirWord: 'over' },
@@ -247,10 +312,41 @@ const SPIN_CONFIGS = {
     primary: null,
     secondary: { label: 'Free leg extension', good: 140, okay: 110, higherIsBetter: true, dirWord: 'over' },
     lean:      { label: 'Back arch (lean)', good: 55, okay: 35, higherIsBetter: true, dirWord: 'over' }
+  },
+  brokenLeg: {
+    name: 'Broken Leg Spin',
+    legRoleMode: 'ankleHeight',
+    primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
+    secondary: { label: 'Free leg bend (folded)', good: 110, okay: 140, higherIsBetter: false, dirWord: 'under' },
+    lean:      { label: 'Torso lean (horizontal)', good: 55, okay: 40, higherIsBetter: true, dirWord: 'over' }
+  },
+  bielmann: {
+    name: 'Bielmann Spin',
+    legRoleMode: 'ankleHeight',
+    primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
+    secondary: { label: 'Free leg fold (grabbed overhead)', good: 60, okay: 90, higherIsBetter: false, dirWord: 'under' },
+    lean:      { label: 'Back arch (lean)', good: 75, okay: 55, higherIsBetter: true, dirWord: 'over' }
+  },
+  donut: {
+    name: 'Donut Spin',
+    legRoleMode: 'ankleHeight',
+    primary:   { label: 'Skating knee (straight)', good: 160, okay: 140, higherIsBetter: true, dirWord: 'over' },
+    secondary: { label: 'Free leg fold (grabbed to side)', good: 60, okay: 90, higherIsBetter: false, dirWord: 'under' },
+    lean:      { label: 'Torso lean (horizontal)', good: 60, okay: 40, higherIsBetter: true, dirWord: 'over' }
+  },
+  combination: {
+    name: 'Combination Spin (freeform)',
+    legRoleMode: 'ankleHeight',
+    primary: null,
+    secondary: null,
+    lean: null
   }
 };
 
 let currentSpinType = 'sit';
+let smoothedPrimary = null, smoothedSecondary = null, smoothedLean = null;
+const ANGLE_SMOOTHING_ALPHA = 0.35;
+function resetAngleSmoothing() { smoothedPrimary = null; smoothedSecondary = null; smoothedLean = null; }
 
 // live (possibly user-adjusted) copy of thresholds per spin type
 const liveConfigs = JSON.parse(JSON.stringify(SPIN_CONFIGS));
@@ -318,6 +414,7 @@ renderSliders();
 spinTypeSelect.addEventListener('change', () => {
   currentSpinType = spinTypeSelect.value;
   renderSliders();
+  resetAngleSmoothing();
 });
 
 settingsBtn.addEventListener('click', () => settingsPanel.classList.add('open'));
@@ -347,6 +444,31 @@ function torsoLeanAngle(shoulderMid, hipMid) {
   const dx = shoulderMid.x - hipMid.x;
   const dy = shoulderMid.y - hipMid.y;
   return Math.atan2(Math.abs(dx), Math.abs(dy)) * (180 / Math.PI);
+}
+
+const VISIBILITY_THRESHOLD = 0.5;
+function isVisible(lm) {
+  // Some landmarks may not report visibility at all - treat those as visible
+  // rather than silently hiding stats the model didn't actually flag as unsure.
+  return lm && (lm.visibility === undefined || lm.visibility >= VISIBILITY_THRESHOLD);
+}
+
+function checkFraming(landmarksPx, canvasW, canvasH) {
+  const margin = 0.04; // 4% edge margin
+  const xs = landmarksPx.map(l => l.x);
+  const ys = landmarksPx.map(l => l.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const bodyHeight = maxY - minY;
+
+  if (minX < canvasW * margin || maxX > canvasW * (1 - margin) ||
+      minY < canvasH * margin || maxY > canvasH * (1 - margin)) {
+    return 'Body near frame edge — step back or recenter';
+  }
+  if (bodyHeight < canvasH * 0.35) {
+    return 'Skater is small in frame — move camera closer';
+  }
+  return null;
 }
 
 function classify(value, metric) {
@@ -418,10 +540,12 @@ const TRAIL_MAX = 40;
 // ---------------------------------------------------------------------
 // Spin rate + rotation counting + auto start/stop
 // ---------------------------------------------------------------------
-const spinSamples = []; // {t, ratio}
+const spinSamples = []; // {t, ratio, smoothed}
 const spinPeakTimes = [];
 let currentRPM = null;
 let lastPeriodMsEstimate = 800;
+let smoothedRatio = null;
+const SMOOTHING_ALPHA = 0.45; // exponential smoothing factor - higher = less smoothing
 
 let activeSession = null; // { mode: 'manual'|'auto', startTime, deepest, rpms:[], rotationHalfCount }
 let recording = false;    // manual toggle state
@@ -449,24 +573,119 @@ function showSummary(session) {
 
   const primaryLabelEl = document.getElementById('sumPrimaryLabel');
   const primaryValEl = document.getElementById('sumDeepest');
+  let primaryLabelText = 'Best angle';
+  let primaryValText = '--';
   if (cfg.primary) {
-    primaryLabelEl.textContent = 'Best ' + cfg.primary.label.toLowerCase();
-    primaryValEl.textContent = session.deepest !== null ? session.deepest.toFixed(0) + '°' : '--';
-  } else {
-    primaryLabelEl.textContent = 'Best angle';
-    primaryValEl.textContent = '--';
+    primaryLabelText = 'Best ' + cfg.primary.label.toLowerCase();
+    primaryValText = session.deepest !== null ? session.deepest.toFixed(0) + '°' : '--';
   }
+  primaryLabelEl.textContent = primaryLabelText;
+  primaryValEl.textContent = primaryValText;
 
   const avgRPM = session.rpms.length ? (session.rpms.reduce((s, v) => s + v, 0) / session.rpms.length) : null;
-  document.getElementById('sumSpin').textContent = avgRPM ? avgRPM.toFixed(1) + ' rev/s' : '--';
+  const avgRPMText = avgRPM ? avgRPM.toFixed(1) + ' rev/s' : '--';
+  document.getElementById('sumSpin').textContent = avgRPMText;
   document.getElementById('sumDuration').textContent = durationSec + 's';
   summaryPanel.classList.add('open');
+
+  // Only log sessions with at least one full rotation - avoids cluttering
+  // history with accidental taps or false-positive auto-detects.
+  if (rotations >= 1) {
+    saveHistoryEntry({
+      timestamp: Date.now(),
+      spinType: SPIN_CONFIGS[currentSpinType].name,
+      mode: session.mode,
+      rotations,
+      primaryLabel: primaryLabelText,
+      primaryValue: primaryValText,
+      avgRPM: avgRPMText,
+      durationSec
+    });
+  }
 }
+
+// ---------------------------------------------------------------------
+// Session history (persisted via localStorage - this is a normal hosted
+// webpage the coach owns, not a sandboxed embed, so this is safe to use
+// and gives history across sessions/days without any backend.)
+// ---------------------------------------------------------------------
+const HISTORY_KEY = 'spinAnalyzerHistory';
+const HISTORY_MAX = 50;
+
+function loadHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch (e) { return []; }
+}
+
+function saveHistoryEntry(entry) {
+  const history = loadHistory();
+  history.unshift(entry);
+  while (history.length > HISTORY_MAX) history.pop();
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) { /* storage full/unavailable */ }
+  renderHistory();
+}
+
+function renderHistory() {
+  const history = loadHistory();
+  historyList.innerHTML = '';
+  if (history.length === 0) {
+    historyList.innerHTML = '<div id="emptyHistoryMsg">No sessions recorded yet.</div>';
+    return;
+  }
+  history.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'historyRow';
+    const date = new Date(h.timestamp);
+    const timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    div.innerHTML = `
+      <div class="hTitle">${h.spinType} — ${h.rotations} rev</div>
+      <div class="hMeta">${h.primaryLabel}: ${h.primaryValue} · ${h.avgRPM} · ${h.durationSec}s</div>
+      <div class="hMeta">${timeStr} (${h.mode})</div>
+    `;
+    historyList.appendChild(div);
+  });
+}
+
+function historyToText() {
+  const history = loadHistory();
+  if (history.length === 0) return 'No sessions recorded yet.';
+  return history.map(h => {
+    const date = new Date(h.timestamp);
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — ${h.spinType}: ${h.rotations} rev, ${h.primaryLabel} ${h.primaryValue}, ${h.avgRPM}, ${h.durationSec}s (${h.mode})`;
+  }).join('\n');
+}
+
+historyBtn.addEventListener('click', () => { renderHistory(); historyPanel.classList.add('open'); });
+closeHistory.addEventListener('click', () => historyPanel.classList.remove('open'));
+clearHistoryBtn.addEventListener('click', () => {
+  if (confirm('Clear all saved session history? This cannot be undone.')) {
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+  }
+});
+exportHistoryBtn.addEventListener('click', async () => {
+  const text = historyToText();
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Spin session history', text }); return; } catch (e) { /* user cancelled or unsupported, fall through */ }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    alert('Copied session history to clipboard.');
+  } catch (e) {
+    alert('Could not copy automatically. Long-press to select and copy the text below:\n\n' + text);
+  }
+});
 
 function updateSpinRate(shoulderWidth, torsoLen, now) {
   if (torsoLen <= 0) return;
-  const ratio = shoulderWidth / torsoLen;
-  spinSamples.push({ t: now, ratio });
+  const rawRatio = shoulderWidth / torsoLen;
+
+  // Exponential smoothing knocks out single-frame pose jitter so it doesn't
+  // get mistaken for a real oscillation peak.
+  smoothedRatio = (smoothedRatio === null) ? rawRatio : (SMOOTHING_ALPHA * rawRatio + (1 - SMOOTHING_ALPHA) * smoothedRatio);
+
+  spinSamples.push({ t: now, ratio: smoothedRatio });
   const cutoff = now - 4000;
   while (spinSamples.length && spinSamples[0].t < cutoff) spinSamples.shift();
 
@@ -478,9 +697,13 @@ function updateSpinRate(shoulderWidth, torsoLen, now) {
 
   if (isPeak) {
     const lastPeak = spinPeakTimes[spinPeakTimes.length - 1];
-    if (!lastPeak || (b.t - lastPeak) > 150) {
+    // Refractory period scales with the observed spin speed: fast spins need
+    // a short minimum gap so real peaks aren't missed; slow/idle motion needs
+    // a longer gap so noise doesn't get double-counted as rotations.
+    const adaptiveRefractoryMs = Math.max(120, Math.min(400, lastPeriodMsEstimate * 0.35));
+    if (!lastPeak || (b.t - lastPeak) > adaptiveRefractoryMs) {
       spinPeakTimes.push(b.t);
-      if (spinPeakTimes.length > 8) spinPeakTimes.shift();
+      if (spinPeakTimes.length > 10) spinPeakTimes.shift();
 
       // --- auto start/stop + rotation counting ---
       if (!recording && autoDetectToggle.checked) {
@@ -490,7 +713,9 @@ function updateSpinRate(shoulderWidth, torsoLen, now) {
 
       if (!recording && autoDetectToggle.checked) {
         if (autoStopTimeout) clearTimeout(autoStopTimeout);
-        const timeoutMs = Math.max(900, lastPeriodMsEstimate * 1.8);
+        // Generous timeout so a brief hitch (e.g. a foot change mid-spin)
+        // doesn't prematurely end the session and cut off the count.
+        const timeoutMs = Math.max(1800, lastPeriodMsEstimate * 2.5);
         autoStopTimeout = setTimeout(() => {
           if (activeSession && activeSession.mode === 'auto') endSession();
         }, timeoutMs);
@@ -501,11 +726,18 @@ function updateSpinRate(shoulderWidth, torsoLen, now) {
   if (spinPeakTimes.length >= 3) {
     const intervals = [];
     for (let k = 1; k < spinPeakTimes.length; k++) intervals.push(spinPeakTimes[k] - spinPeakTimes[k - 1]);
-    const avgIntervalMs = intervals.reduce((s, v) => s + v, 0) / intervals.length;
-    const periodMs = avgIntervalMs * 2;
+    // Median is more robust than mean against one stray/jittery interval.
+    intervals.sort((x, y) => x - y);
+    const medianIntervalMs = intervals[Math.floor(intervals.length / 2)];
+    const periodMs = medianIntervalMs * 2;
     lastPeriodMsEstimate = periodMs;
     currentRPM = 60000 / periodMs;
   }
+}
+
+function adjustRotationCount(delta) {
+  if (!activeSession) return;
+  activeSession.rotationHalfCount = Math.max(0, activeSession.rotationHalfCount + delta * 2);
 }
 
 recordBtn.addEventListener('click', () => {
@@ -524,6 +756,9 @@ recordBtn.addEventListener('click', () => {
   }
 });
 
+rotMinusBtn.addEventListener('click', () => adjustRotationCount(-1));
+rotPlusBtn.addEventListener('click', () => adjustRotationCount(1));
+
 // ---- Setup ----
 async function setupPoseLandmarker() {
   statusEl.textContent = "Loading pose model...";
@@ -532,7 +767,7 @@ async function setupPoseLandmarker() {
   );
   poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
       delegate: "GPU"
     },
     runningMode: "VIDEO",
@@ -541,14 +776,36 @@ async function setupPoseLandmarker() {
   statusEl.textContent = "Model loaded. Point camera at skater.";
 }
 
-async function startCamera() {
-  if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-  const constraints = {
-    video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: false
-  };
-  currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-  video.srcObject = currentStream;
+async function startCamera(mode) {
+  // Fully release the old stream and detach it from the video element before
+  // requesting a new one - iOS Safari can otherwise get confused about which
+  // physical camera is "in use" and silently keep the old one.
+  if (currentStream) {
+    currentStream.getTracks().forEach(t => t.stop());
+    currentStream = null;
+  }
+  video.pause();
+  video.srcObject = null;
+
+  async function requestStream(constraintMode, exact) {
+    const videoConstraint = exact
+      ? { facingMode: { exact: constraintMode }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      : { facingMode: { ideal: constraintMode }, width: { ideal: 1280 }, height: { ideal: 720 } };
+    return navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
+  }
+
+  let stream;
+  try {
+    // Try to force the exact camera first so a switch actually happens.
+    stream = await requestStream(mode, true);
+  } catch (err) {
+    // Device doesn't have that exact camera (e.g. no front camera) - fall
+    // back to a best-effort request rather than leaving the camera off.
+    stream = await requestStream(mode, false);
+  }
+
+  currentStream = stream;
+  video.srcObject = stream;
 
   await new Promise((resolve) => {
     if (video.readyState >= 2 && video.videoWidth > 0) resolve();
@@ -605,11 +862,25 @@ function updateStats(landmarksPx, now) {
   const lAnkle = landmarksPx[LM.L_ANKLE], rAnkle = landmarksPx[LM.R_ANKLE];
   const lShoulder = landmarksPx[LM.L_SHOULDER], rShoulder = landmarksPx[LM.R_SHOULDER];
 
-  const roles = determineLegRoles(lHip, rHip, lKnee, rKnee, lAnkle, rAnkle, SPIN_CONFIGS[currentSpinType].legRoleMode);
+  // Framing feedback takes priority over spin status messages so the coach
+  // knows immediately when a reading can't be trusted due to positioning.
+  const framingWarning = checkFraming(landmarksPx, canvas.width, canvas.height);
+  if (framingWarning) {
+    statusEl.textContent = framingWarning;
+  } else if (!activeSession) {
+    statusEl.textContent = 'Live — analyzing pose';
+  }
+
+  const legsVisible = [lHip, rHip, lKnee, rKnee, lAnkle, rAnkle].every(isVisible);
+  const torsoVisible = [lShoulder, rShoulder, lHip, rHip].every(isVisible);
+
+  const roles = legsVisible
+    ? determineLegRoles(lHip, rHip, lKnee, rKnee, lAnkle, rAnkle, SPIN_CONFIGS[currentSpinType].legRoleMode)
+    : null;
 
   const hipMid = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
   const shoulderMid = { x: (lShoulder.x + rShoulder.x) / 2, y: (lShoulder.y + rShoulder.y) / 2 };
-  const leanAngle = torsoLeanAngle(shoulderMid, hipMid);
+  const rawLeanAngle = torsoVisible ? torsoLeanAngle(shoulderMid, hipMid) : null;
 
   const shoulderWidth = Math.hypot(rShoulder.x - lShoulder.x, rShoulder.y - lShoulder.y);
   const torsoLen = Math.hypot(shoulderMid.x - hipMid.x, shoulderMid.y - hipMid.y);
@@ -627,27 +898,42 @@ function updateStats(landmarksPx, now) {
   const stats = [];
 
   if (cfg.primary && roles) {
-    const q = classify(roles.primaryAngle, cfg.primary);
+    smoothedPrimary = (smoothedPrimary === null) ? roles.primaryAngle
+      : (ANGLE_SMOOTHING_ALPHA * roles.primaryAngle + (1 - ANGLE_SMOOTHING_ALPHA) * smoothedPrimary);
+    const q = classify(smoothedPrimary, cfg.primary);
     worsen(q);
-    stats.push({ label: `${cfg.primary.label} (${roles.primarySide})`, value: roles.primaryAngle.toFixed(0) + '°', q });
+    stats.push({ label: `${cfg.primary.label} (${roles.primarySide})`, value: smoothedPrimary.toFixed(0) + '°', q });
     if (activeSession) {
       const better = cfg.primary.higherIsBetter
-        ? (activeSession.deepest === null || roles.primaryAngle > activeSession.deepest)
-        : (activeSession.deepest === null || roles.primaryAngle < activeSession.deepest);
-      if (better) activeSession.deepest = roles.primaryAngle;
+        ? (activeSession.deepest === null || smoothedPrimary > activeSession.deepest)
+        : (activeSession.deepest === null || smoothedPrimary < activeSession.deepest);
+      if (better) activeSession.deepest = smoothedPrimary;
       if (q === 'good') beep();
     }
+  } else if (cfg.primary) {
+    stats.push({ label: cfg.primary.label, value: 'Obstructed', q: 'neutral' });
   }
+
   if (cfg.secondary && roles) {
-    const q = classify(roles.secondaryAngle, cfg.secondary);
+    smoothedSecondary = (smoothedSecondary === null) ? roles.secondaryAngle
+      : (ANGLE_SMOOTHING_ALPHA * roles.secondaryAngle + (1 - ANGLE_SMOOTHING_ALPHA) * smoothedSecondary);
+    const q = classify(smoothedSecondary, cfg.secondary);
     worsen(q);
-    stats.push({ label: `${cfg.secondary.label} (${roles.secondarySide})`, value: roles.secondaryAngle.toFixed(0) + '°', q });
+    stats.push({ label: `${cfg.secondary.label} (${roles.secondarySide})`, value: smoothedSecondary.toFixed(0) + '°', q });
+  } else if (cfg.secondary) {
+    stats.push({ label: cfg.secondary.label, value: 'Obstructed', q: 'neutral' });
   }
-  if (cfg.lean) {
-    const q = classify(leanAngle, cfg.lean);
+
+  if (cfg.lean && rawLeanAngle !== null) {
+    smoothedLean = (smoothedLean === null) ? rawLeanAngle
+      : (ANGLE_SMOOTHING_ALPHA * rawLeanAngle + (1 - ANGLE_SMOOTHING_ALPHA) * smoothedLean);
+    const q = classify(smoothedLean, cfg.lean);
     worsen(q);
-    stats.push({ label: cfg.lean.label, value: leanAngle.toFixed(0) + '°', q });
+    stats.push({ label: cfg.lean.label, value: smoothedLean.toFixed(0) + '°', q });
+  } else if (cfg.lean) {
+    stats.push({ label: cfg.lean.label, value: 'Obstructed', q: 'neutral' });
   }
+
   if (currentRPM !== null) {
     stats.push({ label: 'Spin rate (approx.)', value: currentRPM.toFixed(1) + ' rev/s', q: 'neutral' });
     if (activeSession) activeSession.rpms.push(currentRPM);
@@ -688,7 +974,7 @@ function renderLoop() {
 
     if (result.landmarks && result.landmarks.length > 0) {
       const landmarks = result.landmarks[0];
-      const pixelLandmarks = landmarks.map(p => ({ x: p.x * canvas.width, y: p.y * canvas.height, z: p.z }));
+      const pixelLandmarks = landmarks.map(p => ({ x: p.x * canvas.width, y: p.y * canvas.height, z: p.z, visibility: p.visibility }));
       const quality = updateStats(pixelLandmarks, now);
       drawHipTrail();
       drawSkeleton(landmarks, quality);
@@ -705,7 +991,7 @@ startBtn.addEventListener('click', async () => {
   startBtn.style.display = 'none';
   try {
     await setupPoseLandmarker();
-    await startCamera();
+    await startCamera(facingMode);
     running = true;
     statusEl.textContent = "Live — analyzing pose";
     renderLoop();
@@ -716,8 +1002,19 @@ startBtn.addEventListener('click', async () => {
 });
 
 switchBtn.addEventListener('click', async () => {
-  facingMode = facingMode === 'environment' ? 'user' : 'environment';
-  if (running) await startCamera();
+  if (!running) return;
+  const newMode = facingMode === 'environment' ? 'user' : 'environment';
+  switchBtn.disabled = true;
+  switchBtn.textContent = 'Switching...';
+  try {
+    await startCamera(newMode);
+    facingMode = newMode;
+  } catch (err) {
+    statusEl.textContent = 'Could not switch camera: ' + err.message;
+  } finally {
+    switchBtn.disabled = false;
+    switchBtn.textContent = 'Flip';
+  }
 });
 </script>
 </body>
